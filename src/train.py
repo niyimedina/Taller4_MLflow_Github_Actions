@@ -9,6 +9,7 @@ import pandas as pd
 from mlflow.models import infer_signature
 import sys
 import traceback
+import joblib
 
 print(f"--- Debug: Initial CWD: {os.getcwd()} ---")
 
@@ -93,15 +94,15 @@ try:
         if "/home/manuelcastiblan/" in actual_artifact_uri:
              print(f"--- ¡¡¡ERROR CRÍTICO!!!: La URI del Artefacto del Run '{actual_artifact_uri}' TODAVÍA contiene la ruta local incorrecta! ---")
 
-
-        mlflow.log_metric("mse", mse)
-        print(f"--- Debug: Intentando log_model con artifact_path='model' ---")
-
         mlflow.sklearn.log_model(
             sk_model=model,
             artifact_path="model"
         )
         print(f"✅ Modelo registrado correctamente. MSE: {mse:.4f}")
+
+        model_path = os.path.join(os.getcwd(), "src", "model.pkl")
+        joblib.dump(model, model_path)
+        print(f"✅ Modelo guardado en: {model_path}")
 
 except Exception as e:
     print(f"\n--- ERROR durante la ejecución de MLflow ---")
