@@ -1,63 +1,68 @@
 # src/validate.py
-import joblib
-import pandas as pd
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
-from sklearn.datasets import load_diabetes  # Importar load_diabetes
-import sys
 import os
+import sys
+import mlflow.pyfunc
+import pandas as pd
 
-# Parámetro de umbral
-THRESHOLD = 5000.0  # Ajusta este umbral según el MSE esperado para load_diabetes
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score, classification_report
 
-# --- Cargar el MISMO dataset que en train.py ---
-print("--- Debug: Cargando dataset load_diabetes ---")
-X, y = load_diabetes(return_X_y=True, as_frame=True)  # Usar as_frame=True si quieres DataFrames
+THRESHOLD_ACCURACY = 0.70
+DATA_PATH = os.path.join(os.getcwd(), "data", "pima-indians-diabetes.csv")
+MODEL_URI_PATH = os.path.join(os.getcwd(), "model_uri.txt")
 
-# División de datos (usar los mismos datos que en entrenamiento no es ideal para validación real,
-# pero necesario aquí para que las dimensiones coincidan. Idealmente, tendrías un split dedicado
-# o usarías el X_test guardado del entrenamiento si fuera posible)
-# Para este ejemplo, simplemente re-dividimos para obtener un X_test con 10 features.
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)  # Añadir random_state para consistencia si es necesario
-print(f"--- Debug: Dimensiones de X_test: {X_test.shape} ---")  # Debería ser (n_samples, 10)
 
-# --- Cargar modelo previamente entrenado ---
-model_filename = "model.pkl"
-#model_path = os.path.abspath(os.path.join(os.getcwd(), model_filename))
-model_path = os.path.abspath(os.path.join(os.getcwd(), "src", model_filename))
-print(f"--- Debug: Intentando cargar modelo desde: {model_path} ---")
+def main():
+    print("Iniciando validación del modelo")
 
-try:
-    model = joblib.load(model_path)
-except FileNotFoundError:
-    print(f"--- ERROR: No se encontró el archivo del modelo en '{model_path}'. Asegúrate de que el paso 'make train' lo haya guardado correctamente en la raíz del proyecto. ---")
-    # Listar archivos en el directorio actual para depuración
-    print(f"--- Debug: Archivos en {os.getcwd()}: ---")
-    try:
-        print(os.listdir(os.getcwd()))
-    except Exception as list_err:
-        print(f"(No se pudo listar el directorio: {list_err})")
-    print("---")
-    sys.exit(1)  # Salir con error
+    if not os.path.exists(DATA_PATH):
+        print(f"No se encontró el dataset en: {DATA_PATH}")
+        sys.exit(1)
 
-# --- Predicción y Validación ---
-print("--- Debug: Realizando predicciones ---")
-try:
-    y_pred = model.predict(X_test)  # Ahora X_test tiene 10 features
-except ValueError as pred_err:
-    print(f"--- ERROR durante la predicción: {pred_err} ---")
-    # Imprimir información de características si el error persiste
-    print(f"Modelo esperaba {model.n_features_in_} features.")
-    print(f"X_test tiene {X_test.shape[1]} features.")
-    sys.exit(1)
+    #df = pd.read_csv(DATA_PATH)
+    columns = [
+    "pregnancies", "glucose", "blood_pressure", "skin_thickness",
+    "insulin", "bmi", "diabetes_pedigree", "age", "target"
+    ]
 
-mse = mean_squared_error(y_test, y_pred)
-print(f"🔍 MSE del modelo: {mse:.4f} (umbral: {THRESHOLD})")
+    df = pd.read_csv(DATA_PATH, names=columns)
 
-# Validación
-if mse <= THRESHOLD:
-    print("✅ El modelo cumple los criterios de calidad.")
-    sys.exit(0)  # éxito
-else:
-    print("❌ El modelo no cumple el umbral. Deteniendo pipeline.")
-    sys.exit(1)  # error
+    target_column = "target" if "target" in df.columns else "outcome"
+
+    X = df.drop(columns=[target_column])
+    y = df[target_column]
+
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    if not os.path.exists(MODEL_URI_PATH):
+        print("No se encontró model_uri.txt. Ejecuta primero make train.")
+        sys.exit(1)
+
+    with open(MODEL_URI_PATH, "r", encoding="utf-8") as f:
+        model_uri = f.read().strip()
+
+    print(f"Cargando modelo registrado desde MLflow: {model_uri}")
+    model = mlflow.pyfunc.load_model(model_uri)
+
+    y_pred = model.predict(X_test)
+
+    accuracy = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    print("Reporte de clasificación:")
+    print(classification_report(y_test, y_pred))
+
+    if accuracy >= THRESHOLD_ACCURACY:
+        print("El modelo cumple los criterios de calidad.")
+        sys.exit(0)
+    else:
+        print("El modelo no cumple el umbral mínimo.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
